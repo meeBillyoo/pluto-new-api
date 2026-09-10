@@ -1,13 +1,16 @@
 package codex
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -110,7 +113,39 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
-	return channel.DoApiRequest(a, c, info, requestBody)
+	resp, err := channel.DoApiRequest(a, c, info, requestBody)
+	if err != nil || resp == nil || resp.StatusCode != http.StatusBadRequest {
+		return resp, err
+	}
+
+	replayableBody, ok := requestBody.(common.ReplayableBody)
+	if !ok {
+		return resp, nil
+	}
+
+	originalBody, err := replayableBody.NewReader()
+	if err != nil {
+		return resp, nil
+	}
+	requestBytes, readErr := io.ReadAll(originalBody)
+	_ = originalBody.Close()
+	if readErr != nil {
+		return resp, nil
+	}
+
+	responseBytes, readErr := readAndRestoreResponseBody(resp)
+	if readErr != nil {
+		return resp, nil
+	}
+
+	retryBytes, inputIndex, shouldRetry, err := removeRejectedReasoningContent(requestBytes, responseBytes)
+	if err != nil || !shouldRetry {
+		return resp, err
+	}
+
+	logger.LogWarn(c, fmt.Sprintf("codex: removed rejected reasoning content at input[%d] and retrying request", inputIndex))
+	_ = resp.Body.Close()
+	return channel.DoApiRequest(a, c, info, bytes.NewReader(retryBytes))
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
