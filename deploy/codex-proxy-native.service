@@ -1,0 +1,21 @@
+[Unit]
+Description=Codex Proxy API on port 8221 (GitHub source)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/collaborators/services/codex-proxy-github
+Environment=NODE_ENV=production
+Environment=PORT=8221
+Environment=CODEX_PROXY_HOST=0.0.0.0
+Environment=CODEX_HOME=/home/collaborators/.codex
+Environment=NODE_OPTIONS=--max-old-space-size=512
+ExecStart=/home/collaborators/.local/node-v20.20.2-linux-x64/bin/node /home/collaborators/services/codex-proxy-github/dist/index.js
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+MemoryMax=768M
+
+[Install]
+WantedBy=default.target

@@ -70,13 +70,14 @@ const channelTestModes = [
 ] as const
 type ChannelTestMode = (typeof channelTestModes)[number]
 const MAX_CHANNEL_TEST_CONCURRENCY = 32
+const MAX_RETRY_TIMES = 20
 
 const createRoutingReliabilitySchema = (
   t: (key: string, options?: Record<string, unknown>) => string
 ) =>
   z
     .object({
-      RetryTimes: z.coerce.number().min(0).max(10),
+      RetryTimes: z.coerce.number().min(0).max(MAX_RETRY_TIMES),
       ChannelDisableThreshold: numericString,
       AutomaticDisableChannelEnabled: z.boolean(),
       AutomaticEnableChannelEnabled: z.boolean(),
@@ -353,7 +354,7 @@ export function RoutingReliabilitySection({
                       <Input
                         type='number'
                         min='0'
-                        max='10'
+                        max={MAX_RETRY_TIMES}
                         {...safeNumberFieldProps(field)}
                       />
                     </FormControl>
