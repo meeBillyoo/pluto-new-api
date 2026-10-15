@@ -84,6 +84,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseTextBuilder strings.Builder
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
+	responseCreated := false
+	var pendingCodexMetadata []string
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -94,7 +96,20 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
+		// Codex upstream may emit its extension metadata before the standard
+		// response.created event, but Responses clients reject that ordering.
+		if streamResponse.Type == "codex.response.metadata" && !responseCreated {
+			pendingCodexMetadata = append(pendingCodexMetadata, data)
+			return
+		}
 		sendResponsesStreamData(c, streamResponse, data)
+		if streamResponse.Type == "response.created" {
+			responseCreated = true
+			for _, metadata := range pendingCodexMetadata {
+				sendResponsesStreamData(c, dto.ResponsesStreamResponse{Type: "codex.response.metadata"}, metadata)
+			}
+			pendingCodexMetadata = nil
+		}
 		switch streamResponse.Type {
 		case "response.completed", "response.done":
 			if streamResponse.Response != nil {

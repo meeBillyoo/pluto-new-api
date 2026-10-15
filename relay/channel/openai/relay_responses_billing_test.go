@@ -265,3 +265,52 @@ func TestOaiResponsesStreamHandlerDoesNotCountPartialImageEvent(t *testing.T) {
 
 	assert.Equal(t, 0, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].CallCount)
 }
+
+func TestOaiResponsesStreamHandlerEmitsCreatedBeforeCodexMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+	})
+
+	body := strings.Join([]string{
+		`data: {"type":"codex.response.metadata","request_id":"req_1"}`,
+		`data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}`,
+		`data: {"type":"response.in_progress","response":{"id":"resp_1","status":"in_progress"}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set(common.RequestIdKey, "responses-codex-metadata-order-test")
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-sol",
+		DisablePing:     true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.6-sol",
+		},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+	}
+
+	usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	assert.Equal(t, 2, usage.TotalTokens)
+
+	got := w.Body.String()
+	assert.Equal(t, 1, strings.Count(got, "event: codex.response.metadata"))
+	requireOrderedSubstrings(t, got,
+		"event: response.created",
+		"event: codex.response.metadata",
+		"event: response.in_progress",
+		"event: response.completed",
+	)
+}
